@@ -70,9 +70,11 @@ static void compute_area (struct tri *tri, int self, int *vertices) {
     }
 }
 
-static void compute_areas (struct tri *tris, int n_tris, int *vertices) {
-    for (int i = 0; i < n_tris; i++)
-        compute_area (&tris[i], i, vertices);
+static void compute_areas (struct tri *origin, struct tri **tris, int n_tris, int *vertices) {
+    for (int i = 0; i < n_tris; i++) {
+        int index = (int)(tris[i] - origin);
+        compute_area (tris[i], index, vertices);
+    }
 }
 
 static void sort_areas (struct tri **tris, int n_tris) {
@@ -119,25 +121,27 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
        number is better (smaller number) */
     /* struct tri *tris = malloc (n_vertices * sizeof *tris); */
     struct tri *tris = malloc (n_vertices * sizeof *tris);
-    struct tri **sorted = malloc (n_vertices * sizeof *tris);
+    size_t n_sorted = n_indices / 2;
+    struct tri **sorted = malloc (n_sorted * sizeof *tris);
 
     for (i = 0; i < n_vertices; i++)
         merge[i] = -1;
+
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
-        sorted[i] = &tris[i];
     }
     for (i = 0; i < n_indices / 2; i++) {
         int a = indices[i * 2], b = indices[i * 2 + 1];
         v_connect (tris, a, b);
         v_connect (tris, b, a);
+        sorted[i] = &tris[a];
     }
 
     /* compute all areas */
-    compute_areas (tris, n_vertices, vertices);
+    compute_areas (tris, sorted, n_sorted, vertices);
 
     /* sort all areas */
-    sort_areas (sorted, n_vertices);
+    sort_areas (sorted, n_sorted);
 
     int reduces = n_vertices / 2;
 
@@ -161,9 +165,9 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
         compute_area (&tris[a], a, vertices);
         compute_area (&tris[b], b, vertices);
 
-        n_vertices--;
-        shift_left (sorted, offset, n_vertices);
-        sort_areas (&sorted[offset], n_vertices - offset);
+        n_sorted--;
+        shift_left (sorted, offset, n_sorted);
+        sort_areas (&sorted[offset], n_sorted - offset);
     }
 
     return merge;
