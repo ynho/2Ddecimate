@@ -173,67 +173,6 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
     return merge;
 }
 #if 0
-int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *merge) {
-    int i;
-    /* no. */
-    /* int *merge = malloc (n_indices * sizeof *merge); */
-    /* yes.. ? */
-    /* int *merge = malloc (n_vertices * sizeof *merge); */
-
-    /* so here, n_vertices is actually correct but since we are getting
-       all the vertices from the whole cube, hacking in the (tweaked) indices
-       number is better (smaller number) */
-    /* struct tri *tris = malloc (n_vertices * sizeof *tris); */
-    struct tri *tris = malloc (n_vertices * sizeof *tris);
-    struct tri **sorted = malloc (n_vertices * sizeof *tris);
-
-    for (i = 0; i < n_indices; i++)
-        merge[i] = -1;
-    for (i = 0; i < n_vertices; i++) {
-        tris[i].a = tris[i].b = -1;
-        sorted[i] = &tris[i];
-    }
-    for (i = 0; i < n_indices / 2; i++) {
-        int a = indices[i * 2], b = indices[i * 2 + 1];
-        v_connect (tris, a, b);
-        v_connect (tris, b, a);
-    }
-
-    /* compute all areas */
-    compute_areas (tris, n_vertices, vertices);
-
-    /* sort all areas */
-    sort_areas (sorted, n_vertices);
-
-    int reduces = n_vertices / 2;
-
-    for (i = 0; i < reduces; i++) {
-        /* skip borders */
-        int offset = 0;
-        while (sorted[offset]->area < 0.0)
-            offset++;
-
-        int origin = (int)(sorted[offset] - tris);
-
-        /* reduce least significant vertex */
-        int a = tris[origin].a, b = tris[origin].b;
-
-        merge[origin] = a;
-        /* tris[origin].area = -1.0; */
-
-        reconnect (&tris[a], origin, b);
-        reconnect (&tris[b], origin, a);
-
-        compute_area (&tris[a], a, vertices);
-        compute_area (&tris[b], b, vertices);
-
-        n_vertices--;
-        shift_left (sorted, offset, n_vertices);
-        sort_areas (&sorted[offset], n_vertices - offset);
-    }
-
-    return merge;
-}
 
 #define SIDE_1 1
 #define SIDE_2 2
@@ -319,6 +258,44 @@ finito:
 #endif
 
 
+static void proj (float m[16], float a, float r, float n, float f) {
+    m[5] = 1.0f / tanf (a * 0.5f);
+    m[0] = m[5] / r;
+    m[10] = -f / (f - n * 2.0f);
+    m[11] = -2.0f * n * (f / (f - n));
+    m[14] = -1.0f;
+
+    m[1] = m[2] = m[3] = m[4] = m[6] = m[7] =
+        m[8] = m[9] = m[12] = m[13] = m[15] = 0.0f;
+}
+
+
+static void transpose (float m[16]) {
+    float t;
+    t = m[1]; m[1] = m[4]; m[4] = t;
+    t = m[2]; m[2] = m[8]; m[8] = t;
+    t = m[3]; m[3] = m[12]; m[12] = t;
+    t = m[6]; m[6] = m[9]; m[9] = t;
+    t = m[7]; m[7] = m[13]; m[13] = t;
+    t = m[11]; m[11] = m[14]; m[14] = t;
+}
+
+#define RAD (0.0174532925)
+static void setup_view (int rx, int ry, int dist) {
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef (0.0, 0.0, -dist);
+    glRotatef (rx, 1.0, 0.0, 0.0);
+    glRotatef (ry, 0.0, 0.0, 1.0);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    float matrix[16];
+    proj (matrix, 70.0 * RAD, 1.0, 0.1, 1000.0);
+    transpose (matrix);
+    glLoadMatrixf (matrix);
+}
+
 int main (void) {
     SDL_Window *Window = NULL;
     SDL_GLContext glContext;
@@ -370,22 +347,53 @@ int main (void) {
         }
     }
 
-    while (running){
+    glEnable(GL_DEPTH_TEST);
 
+    int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
+    float dist = 10.0;
+    while (running){
         while (SDL_PollEvent (&ev)) {
-            if (ev.type == SDL_QUIT)
+            switch (ev.type) {
+            case SDL_QUIT:
                 running = 0;
-            if (ev.type == SDL_KEYDOWN ){
-                switch (ev.key.keysym.sym ){
+                break;
+            case SDL_KEYDOWN:
+                switch (ev.key.keysym.sym) {
 				case SDLK_ESCAPE:
 					running = 0;
 					break;
 				default:
 					break;
                 }
+                break;
+
+            case SDL_MOUSEBUTTONDOWN:
+                prev_x = ev.button.x;
+                prev_y = ev.button.y;
+                mouse_pressed = 1;
+                break;
+
+            case SDL_MOUSEBUTTONUP:
+                mouse_pressed = 0;
+                break;
+
+            case SDL_MOUSEWHEEL:
+                dist -= ev.wheel.y;
+                break;
+
+            case SDL_MOUSEMOTION:
+                if (mouse_pressed) {
+                    ry += ev.motion.x - prev_x;
+                    rx += ev.motion.y - prev_y;
+                    prev_x = ev.motion.x;
+                    prev_y = ev.motion.y;
+                }
+                break;
             }
         }
-        glClear (GL_COLOR_BUFFER_BIT);
+        glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        setup_view (rx, ry, dist);
 
         glBegin (GL_LINES);
         float f = 0.5 / N_vertices;
