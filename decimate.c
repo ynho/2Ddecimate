@@ -4,6 +4,19 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 
+#define SIDE_1 1
+#define SIDE_2 2
+#define SIDE_3 4
+#define SIDE_4 8
+#define SIDE_5 16
+#define SIDE_6 32
+
+#define MX SIDE_1
+#define PX SIDE_2
+#define MY SIDE_3
+#define PY SIDE_4
+#define MZ SIDE_5
+#define PZ SIDE_6
 
 
 /*
@@ -33,7 +46,6 @@ static int ran (int a, int b) {
     return r + 0.5;
 }
 
-
 static float heron (int x[2], int y[2], int z[2]) {
     float a, b, c;
     float q, r;
@@ -55,25 +67,34 @@ static inline void v_connect (struct tri *tris, int a, int b) {
     /* else non-manifold input */
 }
 
-static void compute_area (struct tri *tri, int self, int *vertices) {
+static void compute_area (struct tri *tri, int self, int *vertices, int side) {
+    int x, y;
+    if (side & (MX | PX)) {
+        x = 1, y = 2;
+    } else if (side & (MY | PY)) {
+        x = 0, y = 2;
+    } else {
+        x = 0, y = 1;
+    }
     if (tri->a < 0 || tri->b < 0)
         tri->area = -1.0;
     else {
         int a[2], b[2], c[2];
-        a[0] = vertices[self * 2];
-        a[1] = vertices[self * 2 + 1];
-        b[0] = vertices[tri->a * 2];
-        b[1] = vertices[tri->a * 2 + 1];
-        c[0] = vertices[tri->b * 2];
-        c[1] = vertices[tri->b * 2 + 1];
+        a[0] = vertices[self * 3 + x];
+        a[1] = vertices[self * 3 + y];
+        b[0] = vertices[tri->a * 3 + x];
+        b[1] = vertices[tri->a * 3 + y];
+        c[0] = vertices[tri->b * 3 + x];
+        c[1] = vertices[tri->b * 3 + y];
         tri->area = heron (a, b, c);
     }
 }
 
-static void compute_areas (struct tri *origin, struct tri **tris, int n_tris, int *vertices) {
+static void compute_areas (struct tri *origin, struct tri **tris, int n_tris,
+                           int *vertices, int side) {
     for (int i = 0; i < n_tris; i++) {
         int index = (int)(tris[i] - origin);
-        compute_area (tris[i], index, vertices);
+        compute_area (tris[i], index, vertices, side);
     }
 }
 
@@ -81,7 +102,7 @@ static void sort_areas (struct tri **tris, int n_tris) {
     struct tri *x = NULL;
     for (int i = 1; i < n_tris; i++) {
         int j = i;
-        while (tris[j]->area < tris[j - 1]->area) {
+        while (tris[j]->area < tris[j - 1]->area && j > 1) {
             x = tris[j];
             tris[j] = tris[j - 1];
             tris[j - 1] = x;
@@ -109,7 +130,8 @@ void pa (struct tri **tris, int n) {
     printf ("\n");
 }
 
-int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *merge) {
+void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
+               int *merge, int side) {
     int i;
     /* no. */
     /* int *merge = malloc (n_indices * sizeof *merge); */
@@ -121,16 +143,16 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
        number is better (smaller number) */
     /* struct tri *tris = malloc (n_vertices * sizeof *tris); */
     struct tri *tris = malloc (n_vertices * sizeof *tris);
-    size_t n_sorted = n_indices / 2;
+    printf ("n_indices = %d\n", n_indices);
+    size_t n_sorted = n_indices / 2; /* devided by 2 because 1 edge has 2 vertices */
     struct tri **sorted = malloc (n_sorted * sizeof *tris);
-
-    for (i = 0; i < n_vertices; i++)
-        merge[i] = -1;
+    printf ("sorted = %lx\n", sorted);
+    printf ("n_vertices = %d\n", n_vertices);
 
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
     }
-    for (i = 0; i < n_indices / 2; i++) {
+    for (i = 0; i < n_sorted; i++) {
         int a = indices[i * 2], b = indices[i * 2 + 1];
         v_connect (tris, a, b);
         v_connect (tris, b, a);
@@ -138,16 +160,17 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
     }
 
     /* compute all areas */
-    compute_areas (tris, sorted, n_sorted, vertices);
+    compute_areas (tris, sorted, n_sorted, vertices, side);
 
     /* sort all areas */
     sort_areas (sorted, n_sorted);
 
-    int reduces = n_vertices / 2;
+    int reduces = n_indices / 4;
 
     for (i = 0; i < reduces; i++) {
         /* skip borders */
         int offset = 0;
+        /* TODO: can overflow */
         while (sorted[offset]->area < 0.0)
             offset++;
 
@@ -162,101 +185,14 @@ int* decimate (int n_vertices, int n_indices, int *vertices, int *indices, int *
         reconnect (&tris[a], origin, b);
         reconnect (&tris[b], origin, a);
 
-        compute_area (&tris[a], a, vertices);
-        compute_area (&tris[b], b, vertices);
+        compute_area (&tris[a], a, vertices, side);
+        compute_area (&tris[b], b, vertices, side);
 
         n_sorted--;
         shift_left (sorted, offset, n_sorted);
         sort_areas (&sorted[offset], n_sorted - offset);
     }
-
-    return merge;
 }
-#if 0
-
-#define SIDE_1 1
-#define SIDE_2 2
-#define SIDE_3 4
-#define SIDE_4 8
-#define SIDE_5 16
-#define SIDE_6 32
-
-int decimate_edges (float *vertices, char *v_flags,
-                    int *indices, int n_indices, int n_vertice) {
-    int s, i, j, k;
-    int *tmp_indices = malloc (n_indices * sizeof *tmp_indices);
-    int *v_merge = malloc (n_vertices * sizeof *v_merge);
-
-    for (i = 0; i < n_vertices; i++)
-        v_merge[i] = -1;
-
-    char sides[6] = {SIDE_1, SIDE_2, SIDE_3, SIDE_4, SIDE_5, SIDE_6};
-    for (i = 0; i < 6; i++) {
-        char side = sides[i];
-        k = 0;
-        /* capture every triangle's edge that's on side[i] */
-        for (j = 0; j < n_indices; j += 3) {
-            /* edge 1 */
-            if (v_flags[indices[j]] & side && v_flags[indices[j + 1]] & side) {
-                tmp_indices[k] = indices[j];
-                tmp_indices[k + 1] = indices[j + 1];
-                k += 2;
-            } else if (v_flags[indices[j + 1]] & side && v_flags[indices[j + 2]] & side) {
-                tmp_indices[k + 1] = indices[j + 1];
-                tmp_indices[k + 2] = indices[j + 2];
-                k += 2;
-            } else if (v_flags[indices[j + 1]] & side && v_flags[indices[j]] & side) {
-                tmp_indices[k + 1] = indices[j + 1];
-                tmp_indices[k] = indices[j];
-                k += 2;
-            }
-        }
-        /* decimate */
-        /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
-        decimate (n_vertices, k, vertices, tmp_indices, v_merge);
-    }
-
-    /* now reduce according to v_merge */
-    int *offset = malloc (n_vertices * sizeof *moved);
-    int off = 0;
-    for (i = 0; i < n_vertices; i++) {
-        while (v_merge[i + off] > -1) {
-            off++;
-            if (i + off >= n_vertices)
-                goto end;
-        }
-        offset[i] = off;
-        vertices[i * 3]     = vertices[(i + off) * 3];
-        vertices[i * 3 + 1] = vertices[(i + off) * 3 + 1];
-        vertices[i * 3 + 2] = vertices[(i + off) * 3 + 2];
-    }
-end:
-    for (i = 0; i < n_indices; i++) {
-        int new = v_merge[i] > -1 ? v_merge[i] : indices[i];
-        indices[i] = new - offset[i];
-    }
-    n_vertices -= off;
-    off = 0;
-    for (i = 0; i < n_indices; i += 3) {
-        j = i + off;
-        while (indices[i + off]     == indices[i + off + 1] ||
-               indices[i + off + 1] == indices[i + off + 2] ||
-               indices[i + off + 2] == indices[i + off]) {
-            off += 3;
-            if (i + off + 2 >= n_indices)
-                goto finito;
-        }
-        indices[i]     = indices[i + off];
-        indices[i + 1] = indices[i + off + 1];
-        indices[i + 2] = indices[i + off + 2];
-    }
-finito:
-    n_indices -= off;
-
-    /* tadaa */
-}
-#endif
-
 
 static void proj (float m[16], float a, float r, float n, float f) {
     m[5] = 1.0f / tanf (a * 0.5f);
@@ -299,24 +235,10 @@ static void setup_view (int rx, int ry, int dist) {
     glLoadMatrixf (matrix);
 }
 
-#define GRID_W 30
-#define GRID_H 30
+#define GRID_W 15
+#define GRID_H 15
 #define n_vert (GRID_W * GRID_H)
 #define n_ind ((GRID_W - 1) * (GRID_H - 1) * 2 * 3)
-
-#define SIDE_1 1
-#define SIDE_2 2
-#define SIDE_3 4
-#define SIDE_4 8
-#define SIDE_5 16
-#define SIDE_6 32
-
-#define MX SIDE_1
-#define PX SIDE_2
-#define MY SIDE_3
-#define PY SIDE_4
-#define MZ SIDE_5
-#define PZ SIDE_6
 
 static void mk_grid (int *vertices, int *indices, int *colors) {
     int i, j;
@@ -326,7 +248,8 @@ static void mk_grid (int *vertices, int *indices, int *colors) {
             int index = i * GRID_W + j;
             vertices[index * 3] = j;
             vertices[index * 3 + 1] = i;
-            vertices[index * 3 + 2] = (int)(20.0 * sin(i * 0.09 - 0.2));
+            vertices[index * 3 + 2] = (int)(3.0 * sin(i * 0.69 - 0.5));
+            /* vertices[index * 3 + 2] = 0; */
             colors[index] = 0;
             if (j == 0)
                 colors[index] |= MX;
@@ -356,15 +279,17 @@ static void draw (int *vertices, int *indices, int *color, int n_indices) {
                    0x0000FFF0,
                    0x000000FF,
                    0x00F000FF};
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glPolygonMode(GL_FRONT, GL_LINE);
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < n_indices; i++) {
         int k = indices[i];
         int *vertex = &vertices[k * 3];
         int c = 0x00555555;
-        for (int j = 0; j < 6; j++) {
-            if (color[k] & 1 << j)
-                c |= coul[j];
+        if (color) {
+            for (int j = 0; j < 6; j++) {
+                if (color[k] & 1 << j)
+                    c |= coul[j];
+            }
         }
         glColor3ub (c >> 16, c >> 8 & 0xFF, c & 0xFF);
         glVertex3f (vertex[0], vertex[1], vertex[2]);
@@ -372,6 +297,67 @@ static void draw (int *vertices, int *indices, int *color, int n_indices) {
     glEnd();
 }
 
+
+static int follow_merge (int *v_merge, int i) {
+    while (v_merge[i] > -1)
+        i = v_merge[i];
+    return i;
+}
+
+static void reduce_mesh (int *vertices, int *indices, int *v_merge,
+                         int *n_vertices, int *n_indices) {
+    int i;
+    int *offset = malloc (*n_vertices * sizeof *offset);
+    int off = 0;
+
+    memset (offset, 0, *n_vertices);
+    for (i = 0; i < *n_vertices; i++) {
+        /* offset[i] = 0; */
+        while (i + off < *n_vertices && v_merge[i + off] > -1)
+            off++;
+        if (i + off < *n_vertices) {
+            offset[i + off] = off;
+            vertices[i * 3]     = vertices[(i + off) * 3];
+            vertices[i * 3 + 1] = vertices[(i + off) * 3 + 1];
+            vertices[i * 3 + 2] = vertices[(i + off) * 3 + 2];
+        }
+    }
+
+    for (i = 0; i < *n_indices; i++) {
+        int k = indices[i];
+        int new = follow_merge (v_merge, k);
+        /* if (k != new) */
+        /*     printf ("index[%d] from %d to %d (- %d)%c\n", i, k, new, offset[new], (i % 3) == 2 ? '\n' : ' '); */
+        indices[i] = new - offset[new];
+    }
+    *n_vertices -= off;
+    off = 0;
+
+    for (i = 0; i < *n_indices; i += 3) {
+        while (i + off < *n_indices &&
+               (indices[i + off]     == indices[i + off + 1] ||
+                indices[i + off + 1] == indices[i + off + 2] ||
+                indices[i + off + 2] == indices[i + off])) {
+            /* printf ("removed %d -> %d %d %d\n", i + off, */
+            /*         indices[i + off], indices[i + off + 1], indices[i + off + 2]); */
+            off += 3;
+        }
+        if (i + off + 2 < *n_indices) {
+            indices[i]     = indices[i + off];
+            indices[i + 1] = indices[i + off + 1];
+            indices[i + 2] = indices[i + off + 2];
+        }
+    }
+    *n_indices -= off;
+
+    /* off = indices[0]; */
+    /* for (i = 1; i < *n_indices; i++) { */
+    /*     printf ("index %d = %d%c\n", i, indices[i], (i % 3) == 2 ? '\n' : ' '); */
+    /*     off = off > indices[i] ? off : indices[i]; */
+    /* } */
+    /* printf ("biggest : %d\n", off); */
+    free (offset);
+}
 
 int main (void) {
     SDL_Window *Window = NULL;
@@ -390,6 +376,9 @@ int main (void) {
     SDL_Event ev;
     int running = 1;
 
+    srand(1547917722);
+
+#if 0
 #define N_vertices 10
 #define N_indices (N_vertices * 2 - 2)
     int n_indices = N_indices;
@@ -399,14 +388,13 @@ int main (void) {
         indices[i * 2] = i;
         indices[i * 2 + 1] = i + 1;
     }
-    srand(1547917722);
     for (int i = 0; i < N_vertices; i++) {
         vertices[i * 2] = i * 3 + ran (0, 2) - (N_vertices * 3 / 2);
         vertices[i * 2 + 1] = ran (-N_vertices, N_vertices);
     }
     
     int *merge = malloc (N_vertices * sizeof *merge);
-    decimate (N_vertices, N_indices, vertices, indices, merge);
+    decimate (N_vertices, N_indices, vertices, indices, merge, PZ);
 
     /* update indices */
     for (int i = 0; i < n_indices; i++) {
@@ -423,13 +411,53 @@ int main (void) {
             /* printf ("removed ONE line\n"); */
         }
     }
-
+#else
     glEnable(GL_DEPTH_TEST);
 
     int grid_vertices[n_vert * 3];
     int grid_indices[n_ind];
     int grid_colors[n_vert];
+    int grid_n_vertices = n_vert, grid_n_indices = n_ind;
+    int v_merge[n_vert];
+    int *v_flags = grid_colors;
+
+    for (int i = 0; i < n_vert; i++)
+        v_merge[i] = -1;
     mk_grid (grid_vertices, grid_indices, grid_colors);
+
+    int tmp_indices[n_ind];
+    int k;
+    for (int i = 0; i < 6; i++) {
+        char side = 1 << i;
+        k = 0;
+        /* capture every triangle's edge that's on side[i] */
+        for (int j = 0; j < grid_n_indices; j += 3) {
+            /* edge 1 */
+            /* or :
+               v_flags[indices[j]] & v_flags[indices[j + 1]] & side */
+            if (v_flags[grid_indices[j]] & side && v_flags[grid_indices[j + 1]] & side) {
+                tmp_indices[k] = grid_indices[j];
+                tmp_indices[k + 1] = grid_indices[j + 1];
+                k += 2;
+            } else if (v_flags[grid_indices[j + 1]] & side && v_flags[grid_indices[j + 2]] & side) {
+                tmp_indices[k] = grid_indices[j + 1];
+                tmp_indices[k + 1] = grid_indices[j + 2];
+                k += 2;
+            } else if (v_flags[grid_indices[j + 2]] & side && v_flags[grid_indices[j]] & side) {
+                tmp_indices[k] = grid_indices[j + 2];
+                tmp_indices[k + 1] = grid_indices[j];
+                k += 2;
+            }
+        }
+        /* decimate */
+        /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
+        decimate (grid_n_vertices, k, grid_vertices, tmp_indices, v_merge, side);
+    }
+
+    printf ("before n indices : %d\n", grid_n_indices);
+    reduce_mesh (grid_vertices, grid_indices, v_merge, &grid_n_vertices, &grid_n_indices);
+    printf ("after n indices : %d\n", grid_n_indices);
+#endif
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
     float dist = 10.0;
@@ -478,7 +506,7 @@ int main (void) {
         setup_view (rx, ry, dist);
 
 #if 1
-        draw (grid_vertices, grid_indices, grid_colors, n_ind);
+        draw (grid_vertices, grid_indices, NULL, grid_n_indices);
 #else
         glBegin (GL_LINES);
         float f = 0.5 / N_vertices;
