@@ -98,11 +98,24 @@ static void compute_areas (struct tri *origin, struct tri **tris, int n_tris,
     }
 }
 
-static void sort_areas (struct tri **tris, int n_tris) {
+static int secondary_condition(int *vertices, int a, int b) {
+    if (vertices[a * 3] == vertices[b * 3]) {
+        if (vertices[a * 3 + 1] == vertices[b * 3 + 1])
+            return vertices[a * 3 + 2] < vertices[b * 3 + 2];
+        else
+            return vertices[a * 3 + 1] < vertices[b * 3 + 1];
+    } else
+        return vertices[a * 3] < vertices[b * 3];
+}
+
+static void sort_areas (struct tri **tris, int *vertices, int n_tris) {
     struct tri *x = NULL;
     for (int i = 1; i < n_tris; i++) {
         int j = i;
-        while (tris[j]->area < tris[j - 1]->area && j > 1) {
+        while ((tris[j]->area < tris[j - 1]->area ||
+                (tris[j]->area == tris[j - 1]->area &&
+                 secondary_condition(vertices, j, j - 1)))
+               && j > 1) {
             x = tris[j];
             tris[j] = tris[j - 1];
             tris[j - 1] = x;
@@ -163,7 +176,7 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
     compute_areas (tris, sorted, n_sorted, vertices, side);
 
     /* sort all areas */
-    sort_areas (sorted, n_sorted);
+    sort_areas (sorted, vertices, n_sorted);
 
     int reduces = n_indices / 4;
 
@@ -190,7 +203,7 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
 
         n_sorted--;
         shift_left (sorted, offset, n_sorted);
-        sort_areas (&sorted[offset], n_sorted - offset);
+        sort_areas (&sorted[offset], vertices, n_sorted - offset);
     }
 }
 
