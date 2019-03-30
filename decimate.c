@@ -146,21 +146,13 @@ void pa (struct tri **tris, int n) {
 void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
                int *merge, int side) {
     int i;
-    /* no. */
-    /* int *merge = malloc (n_indices * sizeof *merge); */
-    /* yes.. ? */
-    /* int *merge = malloc (n_vertices * sizeof *merge); */
-
     /* so here, n_vertices is actually correct but since we are getting
        all the vertices from the whole cube, hacking in the (tweaked) indices
        number is better (smaller number) */
     /* struct tri *tris = malloc (n_vertices * sizeof *tris); */
     struct tri *tris = malloc (n_vertices * sizeof *tris);
-    printf ("n_indices = %d\n", n_indices);
     size_t n_sorted = n_indices / 2; /* devided by 2 because 1 edge has 2 vertices */
     struct tri **sorted = malloc (n_sorted * sizeof *tris);
-    printf ("sorted = %lx\n", sorted);
-    printf ("n_vertices = %d\n", n_vertices);
 
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
@@ -339,8 +331,6 @@ static void reduce_mesh (int *vertices, int *indices, int *v_merge,
     for (i = 0; i < *n_indices; i++) {
         int k = indices[i];
         int new = follow_merge (v_merge, k);
-        /* if (k != new) */
-        /*     printf ("index[%d] from %d to %d (- %d)%c\n", i, k, new, offset[new], (i % 3) == 2 ? '\n' : ' '); */
         indices[i] = new - offset[new];
     }
     *n_vertices -= off;
@@ -351,8 +341,6 @@ static void reduce_mesh (int *vertices, int *indices, int *v_merge,
                (indices[i + off]     == indices[i + off + 1] ||
                 indices[i + off + 1] == indices[i + off + 2] ||
                 indices[i + off + 2] == indices[i + off])) {
-            /* printf ("removed %d -> %d %d %d\n", i + off, */
-            /*         indices[i + off], indices[i + off + 1], indices[i + off + 2]); */
             off += 3;
         }
         if (i + off + 2 < *n_indices) {
@@ -363,12 +351,6 @@ static void reduce_mesh (int *vertices, int *indices, int *v_merge,
     }
     *n_indices -= off;
 
-    /* off = indices[0]; */
-    /* for (i = 1; i < *n_indices; i++) { */
-    /*     printf ("index %d = %d%c\n", i, indices[i], (i % 3) == 2 ? '\n' : ' '); */
-    /*     off = off > indices[i] ? off : indices[i]; */
-    /* } */
-    /* printf ("biggest : %d\n", off); */
     free (offset);
 }
 
