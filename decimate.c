@@ -144,15 +144,9 @@ void pa (struct tri **tris, int n) {
 }
 
 void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
-               int *merge, int side) {
+               int *merge, int side, struct tri *tris, struct tri **sorted) {
     int i;
-    /* so here, n_vertices is actually correct but since we are getting
-       all the vertices from the whole cube, hacking in the (tweaked) indices
-       number is better (smaller number) */
-    /* struct tri *tris = malloc (n_vertices * sizeof *tris); */
-    struct tri *tris = malloc (n_vertices * sizeof *tris);
     size_t n_sorted = n_indices / 2; /* devided by 2 because 1 edge has 2 vertices */
-    struct tri **sorted = malloc (n_sorted * sizeof *tris);
 
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
@@ -422,6 +416,8 @@ int main (void) {
 
     int tmp_indices[n_ind];
     int k;
+    struct tri *tris = malloc (grid_n_vertices * sizeof *tris);
+    struct tri **sorted = malloc (grid_n_indices * sizeof *sorted);
     for (int i = 0; i < 6; i++) {
         char side = 1 << i;
         k = 0;
@@ -446,7 +442,8 @@ int main (void) {
         }
         /* decimate */
         /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
-        decimate (grid_n_vertices, k, grid_vertices, tmp_indices, v_merge, side);
+        decimate (grid_n_vertices, k, grid_vertices, tmp_indices,
+                  v_merge, side, tris, sorted);
     }
 
     printf ("before n indices : %d\n", grid_n_indices);
