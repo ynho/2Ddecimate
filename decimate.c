@@ -348,6 +348,59 @@ static void reduce_mesh (int *vertices, int *indices, int *v_merge,
     free (offset);
 }
 
+
+void full_decimate (int *vertices, int *indices, int *n_vertices,
+                    int *n_indices, int *v_flags) {
+    int i, k;
+    size_t i2, i3, i4;
+    i2 =      *n_vertices * sizeof (int);
+    i3 = i2 + *n_indices  * sizeof (int);
+    i4 = i3 + *n_vertices * sizeof (struct tri);
+    size_t total = i4 + *n_indices * sizeof (struct tri*);
+    void *memory = malloc (i4 + *n_indices * sizeof (struct tri*));
+    int *v_merge = memory;
+    int *tmp_indices = memory + i2;
+    struct tri *tris = memory + i3;
+    struct tri **sorted = memory + i4;
+
+    for (i = 0; i < *n_vertices; i++)
+        v_merge[i] = -1;
+
+    for (i = 0; i < 6; i++) {
+        char side = 1 << i;
+        k = 0;
+        /* capture every triangle's edge that's on side[i] */
+        for (int j = 0; j < *n_indices; j += 3) {
+            /* edge 1 */
+            /* or :
+               v_flags[indices[j]] & v_flags[indices[j + 1]] & side */
+            if (v_flags[indices[j]] & side && v_flags[indices[j + 1]] & side) {
+                tmp_indices[k] = indices[j];
+                tmp_indices[k + 1] = indices[j + 1];
+                k += 2;
+            } else if (v_flags[indices[j + 1]] & side && v_flags[indices[j + 2]] & side) {
+                tmp_indices[k] = indices[j + 1];
+                tmp_indices[k + 1] = indices[j + 2];
+                k += 2;
+            } else if (v_flags[indices[j + 2]] & side && v_flags[indices[j]] & side) {
+                tmp_indices[k] = indices[j + 2];
+                tmp_indices[k + 1] = indices[j];
+                k += 2;
+            }
+        }
+        /* decimate */
+        /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
+        decimate (*n_vertices, k, vertices, tmp_indices,
+                  v_merge, side, tris, sorted);
+    }
+
+    printf ("before n indices : %d\n", *n_indices);
+    reduce_mesh (vertices, indices, v_merge, n_vertices, n_indices);
+    printf ("after n indices : %d\n", *n_indices);
+
+    free (memory);
+}
+
 int main (void) {
     SDL_Window *Window = NULL;
     SDL_GLContext glContext;
@@ -407,48 +460,13 @@ int main (void) {
     int grid_indices[n_ind];
     int grid_colors[n_vert];
     int grid_n_vertices = n_vert, grid_n_indices = n_ind;
-    int v_merge[n_vert];
     int *v_flags = grid_colors;
 
-    for (int i = 0; i < n_vert; i++)
-        v_merge[i] = -1;
     mk_grid (grid_vertices, grid_indices, grid_colors);
 
-    int tmp_indices[n_ind];
-    int k;
-    struct tri *tris = malloc (grid_n_vertices * sizeof *tris);
-    struct tri **sorted = malloc (grid_n_indices * sizeof *sorted);
-    for (int i = 0; i < 6; i++) {
-        char side = 1 << i;
-        k = 0;
-        /* capture every triangle's edge that's on side[i] */
-        for (int j = 0; j < grid_n_indices; j += 3) {
-            /* edge 1 */
-            /* or :
-               v_flags[indices[j]] & v_flags[indices[j + 1]] & side */
-            if (v_flags[grid_indices[j]] & side && v_flags[grid_indices[j + 1]] & side) {
-                tmp_indices[k] = grid_indices[j];
-                tmp_indices[k + 1] = grid_indices[j + 1];
-                k += 2;
-            } else if (v_flags[grid_indices[j + 1]] & side && v_flags[grid_indices[j + 2]] & side) {
-                tmp_indices[k] = grid_indices[j + 1];
-                tmp_indices[k + 1] = grid_indices[j + 2];
-                k += 2;
-            } else if (v_flags[grid_indices[j + 2]] & side && v_flags[grid_indices[j]] & side) {
-                tmp_indices[k] = grid_indices[j + 2];
-                tmp_indices[k + 1] = grid_indices[j];
-                k += 2;
-            }
-        }
-        /* decimate */
-        /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
-        decimate (grid_n_vertices, k, grid_vertices, tmp_indices,
-                  v_merge, side, tris, sorted);
-    }
+    full_decimate (grid_vertices, grid_indices, &grid_n_vertices,
+                   &grid_n_indices, v_flags);
 
-    printf ("before n indices : %d\n", grid_n_indices);
-    reduce_mesh (grid_vertices, grid_indices, v_merge, &grid_n_vertices, &grid_n_indices);
-    printf ("after n indices : %d\n", grid_n_indices);
 #endif
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
