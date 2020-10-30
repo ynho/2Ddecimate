@@ -146,7 +146,7 @@ void pa (struct tri **tris, int n) {
 void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
                int *merge, int side, struct tri *tris, struct tri **sorted) {
     int i;
-    size_t n_sorted = n_indices / 2; /* devided by 2 because 1 edge has 2 vertices */
+    size_t n_sorted = n_indices / 2; /* divided by 2 because 1 edge has 2 vertices */
 
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
@@ -420,40 +420,6 @@ int main (void) {
 
     srand(1547917722);
 
-#if 0
-#define N_vertices 10
-#define N_indices (N_vertices * 2 - 2)
-    int n_indices = N_indices;
-    int vertices[2 * N_vertices];
-    int indices[N_indices];
-    for (int i = 0; i < N_vertices - 1; i++) {
-        indices[i * 2] = i;
-        indices[i * 2 + 1] = i + 1;
-    }
-    for (int i = 0; i < N_vertices; i++) {
-        vertices[i * 2] = i * 3 + ran (0, 2) - (N_vertices * 3 / 2);
-        vertices[i * 2 + 1] = ran (-N_vertices, N_vertices);
-    }
-    
-    int *merge = malloc (N_vertices * sizeof *merge);
-    decimate (N_vertices, N_indices, vertices, indices, merge, PZ);
-
-    /* update indices */
-    for (int i = 0; i < n_indices; i++) {
-        if (merge[indices[i]] > -1)
-            indices[i] = merge[indices[i]];
-    }
-    for (int i = 0; i < n_indices; i += 2) {
-        if (indices[i] == indices[i + 1]) {
-            if (i < (n_indices - 1)) {
-                indices[i] = indices[n_indices - 2];
-                indices[i + 1] = indices[n_indices - 1];
-            }
-            n_indices -= 2;
-            /* printf ("removed ONE line\n"); */
-        }
-    }
-#else
     glEnable(GL_DEPTH_TEST);
 
     int grid_vertices[n_vert * 3];
@@ -467,7 +433,6 @@ int main (void) {
     full_decimate (grid_vertices, grid_indices, &grid_n_vertices,
                    &grid_n_indices, v_flags);
 
-#endif
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
     float dist = 10.0;
