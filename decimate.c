@@ -215,8 +215,8 @@ static void transpose (float m[16]) {
     t = m[11]; m[11] = m[14]; m[14] = t;
 }
 
-#define SCREEN_W 640
-#define SCREEN_H 480
+#define SCREEN_W 1600
+#define SCREEN_H 900
 
 #define RAD (0.0174532925)
 static void setup_view (int rx, int ry, int dist) {
@@ -272,22 +272,23 @@ static void mk_grid (int *vertices, int *indices, int *colors) {
 }
 
 static void draw (int *vertices, int *indices, int *color, int n_indices) {
-    int coul[6] = {0x00FF0000,
-                   0x00FFF000,
-                   0x0000FF00,
-                   0x0000FFF0,
-                   0x000000FF,
-                   0x00F000FF};
+    int coul[6] = {0x00550000,
+                   0x00555000,
+                   0x00005500,
+                   0x00005550,
+                   0x00000055,
+                   0x00500055};
     glPolygonMode(GL_FRONT, GL_LINE);
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < n_indices; i++) {
         int k = indices[i];
         int *vertex = &vertices[k * 3];
-        int c = 0x00555555;
+        int c = 0x00222222;
         if (color) {
             for (int j = 0; j < 6; j++) {
-                if (color[k] & 1 << j)
-                    c |= coul[j];
+                if (color[k] & (1 << j)) {
+                    c += coul[j];
+                }
             }
         }
         glColor3ub (c >> 16, c >> 8 & 0xFF, c & 0xFF);
@@ -303,7 +304,7 @@ static int follow_merge (int *v_merge, int i) {
     return i;
 }
 
-static void reduce_mesh (int *vertices, int *indices, int *v_merge,
+static void reduce_mesh (int *vertices, int *indices, int *colors, int *v_merge,
                          int *n_vertices, int *n_indices) {
     int i;
     int *offset = malloc (*n_vertices * sizeof *offset);
@@ -319,6 +320,7 @@ static void reduce_mesh (int *vertices, int *indices, int *v_merge,
             vertices[i * 3]     = vertices[(i + off) * 3];
             vertices[i * 3 + 1] = vertices[(i + off) * 3 + 1];
             vertices[i * 3 + 2] = vertices[(i + off) * 3 + 2];
+            colors[i] = colors[i + off];
         }
     }
 
@@ -395,7 +397,7 @@ void full_decimate (int *vertices, int *indices, int *n_vertices,
     }
 
     printf ("before n indices : %d\n", *n_indices);
-    reduce_mesh (vertices, indices, v_merge, n_vertices, n_indices);
+    reduce_mesh (vertices, indices, v_flags, v_merge, n_vertices, n_indices);
     printf ("after n indices : %d\n", *n_indices);
 
     free (memory);
@@ -481,7 +483,7 @@ int main (void) {
         setup_view (rx, ry, dist);
 
 #if 1
-        draw (grid_vertices, grid_indices, NULL, grid_n_indices);
+        draw (grid_vertices, grid_indices, grid_colors, grid_n_indices);
 #else
         glBegin (GL_LINES);
         float f = 0.5 / N_vertices;
