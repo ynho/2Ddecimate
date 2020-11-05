@@ -18,6 +18,7 @@
 #define MZ SIDE_5
 #define PZ SIDE_6
 
+#define EPSILON 0.001
 
 /*
 for each cube c:
@@ -35,7 +36,7 @@ end;
 */
 
 struct tri {
-    float area;
+    float area, distance;
     int a, b;
 };
 
@@ -44,6 +45,12 @@ static int ran (int a, int b) {
     r *= (b - a);
     r += a;
     return r + 0.5;
+}
+
+static float distance (int x[2], int y[2]) {
+    int a = x[0] - y[0];
+    int b = x[1] - y[1];
+    return sqrt (a * a + b * b);
 }
 
 static float heron (int x[2], int y[2], int z[2]) {
@@ -67,7 +74,7 @@ static inline void v_connect (struct tri *tris, int a, int b) {
     /* else non-manifold input */
 }
 
-static void compute_area (struct tri *tri, int self, int *vertices, int side) {
+static void compute_area_and_distance (struct tri *tri, int self, int *vertices, int side) {
     int x, y;
     if (side & (MX | PX)) {
         x = 1, y = 2;
@@ -87,6 +94,7 @@ static void compute_area (struct tri *tri, int self, int *vertices, int side) {
         c[0] = vertices[tri->b * 3 + x];
         c[1] = vertices[tri->b * 3 + y];
         tri->area = heron (a, b, c);
+        tri->distance = distance (b, c);
     }
 }
 
@@ -94,7 +102,7 @@ static void compute_areas (struct tri *origin, struct tri **tris, int n_tris,
                            int *vertices, int side) {
     for (int i = 0; i < n_tris; i++) {
         int index = (int)(tris[i] - origin);
-        compute_area (tris[i], index, vertices, side);
+        compute_area_and_distance (tris[i], index, vertices, side);
     }
 }
 
@@ -112,10 +120,17 @@ static void sort_areas (struct tri **tris, int *vertices, int n_tris) {
     struct tri *x = NULL;
     for (int i = 1; i < n_tris; i++) {
         int j = i;
-        while ((tris[j]->area < tris[j - 1]->area ||
-                (tris[j]->area == tris[j - 1]->area &&
-                 secondary_condition(vertices, j, j - 1)))
-               && j > 1) {
+        while (j >= 1 &&
+               ((fabs (tris[j]->area - tris[j - 1]->area) < EPSILON
+                 && tris[j]->distance < tris[j - 1]->distance)
+                ||
+                (tris[j]->area < tris[j - 1]->area
+                 && fabs (tris[j]->area - tris[j - 1]->area) >= EPSILON
+                /* wtf is this? */
+                /* || */
+                /* (tris[j]->area == tris[j - 1]->area && */
+                /*  secondary_condition(vertices, j, j - 1)) */
+                    ))) {
             x = tris[j];
             tris[j] = tris[j - 1];
             tris[j - 1] = x;
@@ -184,8 +199,8 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
         reconnect (&tris[a], origin, b);
         reconnect (&tris[b], origin, a);
 
-        compute_area (&tris[a], a, vertices, side);
-        compute_area (&tris[b], b, vertices, side);
+        compute_area_and_distance (&tris[a], a, vertices, side);
+        compute_area_and_distance (&tris[b], b, vertices, side);
 
         n_sorted--;
         shift_left (sorted, offset, n_sorted);
@@ -246,8 +261,8 @@ static void reduce_mesh (int *vertices, int *indices, int *colors, int *v_merge,
 }
 
 
-void full_decimate (int *vertices, int *indices, int *n_vertices,
-                    int *n_indices, int *v_flags) {
+void full_decimate_edges (int *vertices, int *indices, int *n_vertices,
+                          int *n_indices, int *v_flags) {
     int i, k;
     size_t i2, i3, i4;
     i2 =      *n_vertices * sizeof (int);
@@ -436,8 +451,8 @@ int main (void) {
 
     mk_grid (grid_vertices, grid_indices, grid_colors);
 
-    full_decimate (grid_vertices, grid_indices, &grid_n_vertices,
-                   &grid_n_indices, v_flags);
+    full_decimate_edges (grid_vertices, grid_indices, &grid_n_vertices,
+                         &grid_n_indices, v_flags);
 
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
