@@ -380,7 +380,7 @@ static void mk_grid (int *vertices, int *indices, int *colors) {
                 colors[index] |= PX;
             if (i == 0)
                 colors[index] |= MY;
-            if (i == GRID_W - 1)
+            if (i == GRID_H - 1)
                 colors[index] |= PY;
         }
     }
