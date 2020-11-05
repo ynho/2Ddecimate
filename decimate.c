@@ -193,111 +193,6 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
     }
 }
 
-static void proj (float m[16], float a, float r, float n, float f) {
-    m[5] = 1.0f / tanf (a * 0.5f);
-    m[0] = m[5] / r;
-    m[10] = -f / (f - n * 2.0f);
-    m[11] = -2.0f * n * (f / (f - n));
-    m[14] = -1.0f;
-
-    m[1] = m[2] = m[3] = m[4] = m[6] = m[7] =
-        m[8] = m[9] = m[12] = m[13] = m[15] = 0.0f;
-}
-
-
-static void transpose (float m[16]) {
-    float t;
-    t = m[1]; m[1] = m[4]; m[4] = t;
-    t = m[2]; m[2] = m[8]; m[8] = t;
-    t = m[3]; m[3] = m[12]; m[12] = t;
-    t = m[6]; m[6] = m[9]; m[9] = t;
-    t = m[7]; m[7] = m[13]; m[13] = t;
-    t = m[11]; m[11] = m[14]; m[14] = t;
-}
-
-#define SCREEN_W 1600
-#define SCREEN_H 900
-
-#define RAD (0.0174532925)
-static void setup_view (int rx, int ry, int dist) {
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef (0.0, 0.0, -dist);
-    glRotatef (rx, 1.0, 0.0, 0.0);
-    glRotatef (ry, 0.0, 0.0, 1.0);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    float matrix[16];
-    proj (matrix, 70.0 * RAD, (float)SCREEN_W / SCREEN_H, 0.1, 1000.0);
-    transpose (matrix);
-    glLoadMatrixf (matrix);
-}
-
-#define GRID_W 15
-#define GRID_H 15
-#define n_vert (GRID_W * GRID_H)
-#define n_ind ((GRID_W - 1) * (GRID_H - 1) * 2 * 3)
-
-static void mk_grid (int *vertices, int *indices, int *colors) {
-    int i, j;
-
-    for (i = 0; i < GRID_H; i++) {
-        for (j = 0; j < GRID_W; j++) {
-            int index = i * GRID_W + j;
-            vertices[index * 3] = j;
-            vertices[index * 3 + 1] = i;
-            vertices[index * 3 + 2] = (int)(3.0 * sin(i * 0.69 - 0.5));
-            /* vertices[index * 3 + 2] = 0; */
-            colors[index] = 0;
-            if (j == 0)
-                colors[index] |= MX;
-            if (j == GRID_W - 1)
-                colors[index] |= PX;
-            if (i == 0)
-                colors[index] |= MY;
-            if (i == GRID_W - 1)
-                colors[index] |= PY;
-        }
-    }
-    for (i = 0; i < n_ind / 6; i++) {
-        int k = i + i / (GRID_W - 1);
-        indices[i * 6] = k;
-        indices[i * 6 + 1] = k + 1;
-        indices[i * 6 + 2] = k + GRID_W;
-        indices[i * 6 + 3] = k + 1;
-        indices[i * 6 + 4] = k + GRID_W + 1;
-        indices[i * 6 + 5] = k + GRID_W;
-    }
-}
-
-static void draw (int *vertices, int *indices, int *color, int n_indices) {
-    int coul[6] = {0x00550000,
-                   0x00555000,
-                   0x00005500,
-                   0x00005550,
-                   0x00000055,
-                   0x00500055};
-    glPolygonMode(GL_FRONT, GL_LINE);
-    glBegin(GL_TRIANGLES);
-    for (int i = 0; i < n_indices; i++) {
-        int k = indices[i];
-        int *vertex = &vertices[k * 3];
-        int c = 0x00222222;
-        if (color) {
-            for (int j = 0; j < 6; j++) {
-                if (color[k] & (1 << j)) {
-                    c += coul[j];
-                }
-            }
-        }
-        glColor3ub (c >> 16, c >> 8 & 0xFF, c & 0xFF);
-        glVertex3f (vertex[0], vertex[1], vertex[2]);
-    }
-    glEnd();
-}
-
-
 static int follow_merge (int *v_merge, int i) {
     while (v_merge[i] > -1)
         i = v_merge[i];
@@ -402,6 +297,115 @@ void full_decimate (int *vertices, int *indices, int *n_vertices,
 
     free (memory);
 }
+
+
+
+
+static void proj (float m[16], float a, float r, float n, float f) {
+    m[5] = 1.0f / tanf (a * 0.5f);
+    m[0] = m[5] / r;
+    m[10] = -f / (f - n * 2.0f);
+    m[11] = -2.0f * n * (f / (f - n));
+    m[14] = -1.0f;
+
+    m[1] = m[2] = m[3] = m[4] = m[6] = m[7] =
+        m[8] = m[9] = m[12] = m[13] = m[15] = 0.0f;
+}
+
+
+static void transpose (float m[16]) {
+    float t;
+    t = m[1]; m[1] = m[4]; m[4] = t;
+    t = m[2]; m[2] = m[8]; m[8] = t;
+    t = m[3]; m[3] = m[12]; m[12] = t;
+    t = m[6]; m[6] = m[9]; m[9] = t;
+    t = m[7]; m[7] = m[13]; m[13] = t;
+    t = m[11]; m[11] = m[14]; m[14] = t;
+}
+
+#define SCREEN_W 1600
+#define SCREEN_H 900
+
+#define RAD (0.0174532925)
+static void setup_view (int rx, int ry, int dist) {
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef (0.0, 0.0, -dist);
+    glRotatef (rx, 1.0, 0.0, 0.0);
+    glRotatef (ry, 0.0, 0.0, 1.0);
+    glTranslatef (-10.0, -10.0, 0);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    float matrix[16];
+    proj (matrix, 70.0 * RAD, (float)SCREEN_W / SCREEN_H, 0.1, 1000.0);
+    transpose (matrix);
+    glLoadMatrixf (matrix);
+}
+
+#define GRID_W 15
+#define GRID_H 15
+#define n_vert (GRID_W * GRID_H)
+#define n_ind ((GRID_W - 1) * (GRID_H - 1) * 2 * 3)
+
+static void mk_grid (int *vertices, int *indices, int *colors) {
+    int i, j;
+
+    for (i = 0; i < GRID_H; i++) {
+        for (j = 0; j < GRID_W; j++) {
+            int index = i * GRID_W + j;
+            vertices[index * 3] = j;
+            vertices[index * 3 + 1] = i;
+            vertices[index * 3 + 2] = (int)(3.0 * sin(i * 0.69 - 0.5));
+            /* vertices[index * 3 + 2] = 0; */
+            colors[index] = 0;
+            if (j == 0)
+                colors[index] |= MX;
+            if (j == GRID_W - 1)
+                colors[index] |= PX;
+            if (i == 0)
+                colors[index] |= MY;
+            if (i == GRID_W - 1)
+                colors[index] |= PY;
+        }
+    }
+    for (i = 0; i < n_ind / 6; i++) {
+        int k = i + i / (GRID_W - 1);
+        indices[i * 6] = k;
+        indices[i * 6 + 1] = k + 1;
+        indices[i * 6 + 2] = k + GRID_W;
+        indices[i * 6 + 3] = k + 1;
+        indices[i * 6 + 4] = k + GRID_W + 1;
+        indices[i * 6 + 5] = k + GRID_W;
+    }
+}
+
+static void draw (int *vertices, int *indices, int *color, int n_indices) {
+    int coul[6] = {0x00550000,
+                   0x00555000,
+                   0x00005500,
+                   0x00005550,
+                   0x00000055,
+                   0x00500055};
+    glPolygonMode(GL_FRONT, GL_LINE);
+    glBegin(GL_TRIANGLES);
+    for (int i = 0; i < n_indices; i++) {
+        int k = indices[i];
+        int *vertex = &vertices[k * 3];
+        int c = 0x00222222;
+        if (color) {
+            for (int j = 0; j < 6; j++) {
+                if (color[k] & (1 << j)) {
+                    c += coul[j];
+                }
+            }
+        }
+        glColor3ub (c >> 16, c >> 8 & 0xFF, c & 0xFF);
+        glVertex3f (vertex[0], vertex[1], vertex[2]);
+    }
+    glEnd();
+}
+
 
 int main (void) {
     SDL_Window *Window = NULL;
