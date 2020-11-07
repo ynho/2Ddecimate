@@ -40,6 +40,14 @@ struct tri {
     int a, b;
 };
 
+struct mesh {
+    int *vertices;
+    int *indices;
+    int *v_flags;
+    int n_vertices;
+    int n_indices;
+};
+
 static int ran (int a, int b) {
     float r = (float)rand () / RAND_MAX;
     r *= (b - a);
@@ -261,28 +269,28 @@ static void reduce_mesh (int *vertices, int *indices, int *colors, int *v_merge,
 }
 
 
-void full_decimate_edges (int *vertices, int *indices, int *n_vertices,
-                          int *n_indices, int *v_flags) {
+void full_decimate_edges (struct mesh *mesh) {
     int i, k;
+    int *vertices = mesh->vertices, *indices = mesh->indices, *v_flags = mesh->v_flags;
     size_t i2, i3, i4;
-    i2 =      *n_vertices * sizeof (int);
-    i3 = i2 + *n_indices  * sizeof (int);
-    i4 = i3 + *n_vertices * sizeof (struct tri);
-    size_t total = i4 + *n_indices * sizeof (struct tri*);
-    void *memory = malloc (i4 + *n_indices * sizeof (struct tri*));
+    i2 =      mesh->n_vertices * sizeof (int);
+    i3 = i2 + mesh->n_indices  * sizeof (int);
+    i4 = i3 + mesh->n_vertices * sizeof (struct tri);
+    size_t total = i4 + mesh->n_indices * sizeof (struct tri*);
+    void *memory = malloc (i4 + mesh->n_indices * sizeof (struct tri*));
     int *v_merge = memory;
     int *tmp_indices = memory + i2;
     struct tri *tris = memory + i3;
     struct tri **sorted = memory + i4;
 
-    for (i = 0; i < *n_vertices; i++)
+    for (i = 0; i < mesh->n_vertices; i++)
         v_merge[i] = -1;
 
     for (i = 0; i < 6; i++) {
         char side = 1 << i;
         k = 0;
         /* capture every triangle's edge that's on side[i] */
-        for (int j = 0; j < *n_indices; j += 3) {
+        for (int j = 0; j < mesh->n_indices; j += 3) {
             /* edge 1 */
             /* or :
                v_flags[indices[j]] & v_flags[indices[j + 1]] & side */
@@ -302,18 +310,21 @@ void full_decimate_edges (int *vertices, int *indices, int *n_vertices,
         }
         /* decimate */
         /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
-        decimate (*n_vertices, k, vertices, tmp_indices,
+        decimate (mesh->n_vertices, k, vertices, tmp_indices,
                   v_merge, side, tris, sorted);
     }
 
-    printf ("before n indices : %d\n", *n_indices);
-    reduce_mesh (vertices, indices, v_flags, v_merge, n_vertices, n_indices);
-    printf ("after n indices : %d\n", *n_indices);
+    printf ("before n indices : %d\n", mesh->n_indices);
+    reduce_mesh (vertices, indices, v_flags, v_merge, &mesh->n_vertices, &mesh->n_indices);
+    printf ("after n indices : %d\n", mesh->n_indices);
 
     free (memory);
 }
 
 
+/* void merge_8cubes (struct mesh m[8], struct mesh *result) { */
+
+/* } */
 
 
 static void proj (float m[16], float a, float r, float n, float f) {
@@ -363,39 +374,39 @@ static void setup_view (int rx, int ry, int dist) {
 #define n_vert (GRID_W * GRID_H)
 #define n_ind ((GRID_W - 1) * (GRID_H - 1) * 2 * 3)
 
-static void mk_grid (int *vertices, int *indices, int *colors) {
+static void mk_grid (struct mesh *mesh) {
     int i, j;
 
     for (i = 0; i < GRID_H; i++) {
         for (j = 0; j < GRID_W; j++) {
             int index = i * GRID_W + j;
-            vertices[index * 3] = j;
-            vertices[index * 3 + 1] = i;
-            vertices[index * 3 + 2] = (int)(3.0 * sin(i * 0.69 - 0.5));
+            mesh->vertices[index * 3] = j;
+            mesh->vertices[index * 3 + 1] = i;
+            mesh->vertices[index * 3 + 2] = (int)(3.0 * sin(i * 0.69 - 0.5));
             /* vertices[index * 3 + 2] = 0; */
-            colors[index] = 0;
+            mesh->v_flags[index] = 0;
             if (j == 0)
-                colors[index] |= MX;
+                mesh->v_flags[index] |= MX;
             if (j == GRID_W - 1)
-                colors[index] |= PX;
+                mesh->v_flags[index] |= PX;
             if (i == 0)
-                colors[index] |= MY;
+                mesh->v_flags[index] |= MY;
             if (i == GRID_H - 1)
-                colors[index] |= PY;
+                mesh->v_flags[index] |= PY;
         }
     }
     for (i = 0; i < n_ind / 6; i++) {
         int k = i + i / (GRID_W - 1);
-        indices[i * 6] = k;
-        indices[i * 6 + 1] = k + 1;
-        indices[i * 6 + 2] = k + GRID_W;
-        indices[i * 6 + 3] = k + 1;
-        indices[i * 6 + 4] = k + GRID_W + 1;
-        indices[i * 6 + 5] = k + GRID_W;
+        mesh->indices[i * 6] = k;
+        mesh->indices[i * 6 + 1] = k + 1;
+        mesh->indices[i * 6 + 2] = k + GRID_W;
+        mesh->indices[i * 6 + 3] = k + 1;
+        mesh->indices[i * 6 + 4] = k + GRID_W + 1;
+        mesh->indices[i * 6 + 5] = k + GRID_W;
     }
 }
 
-static void draw (int *vertices, int *indices, int *color, int n_indices) {
+static void draw (struct mesh *mesh) {
     int coul[6] = {0x00550000,
                    0x00555000,
                    0x00005500,
@@ -404,13 +415,13 @@ static void draw (int *vertices, int *indices, int *color, int n_indices) {
                    0x00500055};
     glPolygonMode(GL_FRONT, GL_LINE);
     glBegin(GL_TRIANGLES);
-    for (int i = 0; i < n_indices; i++) {
-        int k = indices[i];
-        int *vertex = &vertices[k * 3];
+    for (int i = 0; i < mesh->n_indices; i++) {
+        int k = mesh->indices[i];
+        int *vertex = &mesh->vertices[k * 3];
         int c = 0x00222222;
-        if (color) {
+        if (mesh->v_flags) {
             for (int j = 0; j < 6; j++) {
-                if (color[k] & (1 << j)) {
+                if (mesh->v_flags[k] & (1 << j)) {
                     c += coul[j];
                 }
             }
@@ -446,14 +457,16 @@ int main (void) {
     int grid_vertices[n_vert * 3];
     int grid_indices[n_ind];
     int grid_colors[n_vert];
-    int grid_n_vertices = n_vert, grid_n_indices = n_ind;
     int *v_flags = grid_colors;
+    struct mesh mesh;
+    mesh.vertices = grid_vertices;
+    mesh.indices = grid_indices;
+    mesh.v_flags = grid_colors;
+    mesh.n_vertices = n_vert;
+    mesh.n_indices = n_ind;
 
-    mk_grid (grid_vertices, grid_indices, grid_colors);
-
-    full_decimate_edges (grid_vertices, grid_indices, &grid_n_vertices,
-                         &grid_n_indices, v_flags);
-
+    mk_grid (&mesh);
+    full_decimate_edges (&mesh);
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
     float dist = 10.0;
@@ -501,18 +514,7 @@ int main (void) {
 
         setup_view (rx, ry, dist);
 
-#if 1
-        draw (grid_vertices, grid_indices, grid_colors, grid_n_indices);
-#else
-        glBegin (GL_LINES);
-        float f = 0.5 / N_vertices;
-        for (int i = 0; i < n_indices; i++) {
-            glColor3f (1.0, (float)i / N_indices, f * vertices[indices[i] * 2 + 1]);
-            glVertex3f(f * vertices[indices[i] * 2],
-                       f * vertices[indices[i] * 2 + 1], 0.0f);
-        }
-        glEnd();
-#endif
+        draw (&mesh);
 
         SDL_GL_SwapWindow (Window);
     }
