@@ -20,6 +20,9 @@
 
 #define EPSILON 0.001
 
+#define TRUE 1
+#define FALSE 0
+
 /*
 for each cube c:
   for each adjacent face f of c:
@@ -243,56 +246,51 @@ static int follow_merge (int *v_merge, int i) {
     return i;
 }
 
-static int reduce_vertices (int *vertices, int *colors, int *v_merge, int n_vertices, int *offset) {
+static void reduce_vertices (struct mesh *mesh, int *v_merge, int *offset) {
     int i, off = 0;
-    memset (offset, 0, n_vertices * sizeof *offset);
-    for (i = 0; i < n_vertices; i++) {
+    memset (offset, 0, mesh->n_vertices * sizeof *offset);
+    for (i = 0; i < mesh->n_vertices; i++) {
         /* offset[i] = 0; */
-        while (i + off < n_vertices && v_merge[i + off] > -1)
+        while (i + off < mesh->n_vertices && v_merge[i + off] > -1)
             off++;
-        if (i + off < n_vertices) {
+        if (i + off < mesh->n_vertices) {
             offset[i + off] = off;
-            vertices[i * 3]     = vertices[(i + off) * 3];
-            vertices[i * 3 + 1] = vertices[(i + off) * 3 + 1];
-            vertices[i * 3 + 2] = vertices[(i + off) * 3 + 2];
-            colors[i] = colors[i + off];
+            mesh->vertices[i * 3]     = mesh->vertices[(i + off) * 3];
+            mesh->vertices[i * 3 + 1] = mesh->vertices[(i + off) * 3 + 1];
+            mesh->vertices[i * 3 + 2] = mesh->vertices[(i + off) * 3 + 2];
+            mesh->v_flags[i] = mesh->v_flags[i + off];
         }
     }
-    return off;
+    mesh->n_vertices -= off;
 }
 
-static void reduce_mesh (int *vertices, int *indices, int *colors, int *v_merge,
-                         int *n_vertices, int *n_indices) {
+static void reduce_mesh (struct mesh *mesh, int *v_merge, int *offset, int reduce_indices) {
     int i;
-    int *offset = malloc (*n_vertices * sizeof *offset);
-    int off;
 
-    off = reduce_vertices (vertices, colors, v_merge, *n_vertices, offset);
+    reduce_vertices (mesh, v_merge, offset);
 
-    for (i = 0; i < *n_indices; i++) {
-        int k = indices[i];
-        int new = follow_merge (v_merge, k);
-        indices[i] = new - offset[new];
+    for (i = 0; i < mesh->n_indices; i++) {
+        int new = follow_merge (v_merge, mesh->indices[i]);
+        mesh->indices[i] = new - offset[new];
     }
-    *n_vertices -= off;
-    off = 0;
 
-    for (i = 0; i < *n_indices; i += 3) {
-        while (i + off < *n_indices &&
-               (indices[i + off]     == indices[i + off + 1] ||
-                indices[i + off + 1] == indices[i + off + 2] ||
-                indices[i + off + 2] == indices[i + off])) {
-            off += 3;
+    if (reduce_indices) {
+        int off = 0;
+        for (i = 0; i < mesh->n_indices; i += 3) {
+            while (i + off < mesh->n_indices &&
+                   (mesh->indices[i + off]     == mesh->indices[i + off + 1] ||
+                    mesh->indices[i + off + 1] == mesh->indices[i + off + 2] ||
+                    mesh->indices[i + off + 2] == mesh->indices[i + off])) {
+                off += 3;
+            }
+            if (i + off + 2 < mesh->n_indices) {
+                mesh->indices[i]     = mesh->indices[i + off];
+                mesh->indices[i + 1] = mesh->indices[i + off + 1];
+                mesh->indices[i + 2] = mesh->indices[i + off + 2];
+            }
         }
-        if (i + off + 2 < *n_indices) {
-            indices[i]     = indices[i + off];
-            indices[i + 1] = indices[i + off + 1];
-            indices[i + 2] = indices[i + off + 2];
-        }
+        mesh->n_indices -= off;
     }
-    *n_indices -= off;
-
-    free (offset);
 }
 
 
@@ -346,7 +344,9 @@ void full_decimate_edges (int edges, struct mesh *mesh) {
     }
 
     printf ("before n indices : %d\n", mesh->n_indices);
-    reduce_mesh (vertices, indices, v_flags, v_merge, &mesh->n_vertices, &mesh->n_indices);
+    int *offset = malloc (mesh->n_vertices * sizeof *offset);
+    reduce_mesh (mesh, v_merge, offset, TRUE);
+    free (offset);
     printf ("after n indices : %d\n", mesh->n_indices);
 
     free (memory);
@@ -404,14 +404,7 @@ void merge (int side, struct mesh *a, struct mesh *b, struct mesh *result) {
         }
     }
 
-    int missing = reduce_vertices (result->vertices, result->v_flags, v_merge, result->n_vertices, offset);
-
-    for (i = 0; i < result->n_indices; i++) {
-        int k = result->indices[i];
-        int new = v_merge[k] < 0 ? k : v_merge[k];
-        result->indices[i] = new - offset[new];
-    }
-    result->n_vertices -= missing;
+    reduce_mesh (result, v_merge, offset, FALSE);
 
     free (v_merge);
     free (offset);
