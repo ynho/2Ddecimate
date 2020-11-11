@@ -183,17 +183,11 @@ void reconnect (struct tri *t, int old, int new) {
         t->b = new;
 }
 
-void pa (struct tri **tris, int n) {
-    printf ("areas : ");
-    for (int i = 0; i < n; i++)
-        printf ("%.2f\t", tris[i]->area);
-    printf ("\n");
-}
-
 void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
                int *merge, int side, struct tri *tris, struct tri **sorted) {
     int i;
     size_t n_sorted = n_indices / 2; /* divided by 2 because 1 edge has 2 vertices */
+    int offset = 0;
 
     for (i = 0; i < n_vertices; i++) {
         tris[i].a = tris[i].b = -1;
@@ -208,14 +202,12 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
     /* compute all areas */
     compute_areas (tris, sorted, n_sorted, vertices, side);
 
-    /* sort all areas */
-    sort_areas (sorted, vertices, n_sorted);
-
     int reduces = n_indices / 4;
 
     for (i = 0; i < reduces; i++) {
-        /* skip borders */
-        int offset = 0;
+        sort_areas (&sorted[offset], vertices, n_sorted - offset);
+
+        offset = 0;
         /* TODO: can overflow */
         while (sorted[offset]->area < 0.0)
             offset++;
@@ -236,7 +228,6 @@ void decimate (int n_vertices, int n_indices, int *vertices, int *indices,
 
         n_sorted--;
         shift_left (sorted, offset, n_sorted);
-        sort_areas (&sorted[offset], vertices, n_sorted - offset);
     }
 }
 
@@ -247,18 +238,19 @@ static int follow_merge (int *v_merge, int i) {
 }
 
 static void reduce_vertices (struct mesh *mesh, int *v_merge, int *offset) {
-    int i, off = 0;
-    memset (offset, 0, mesh->n_vertices * sizeof *offset);
-    for (i = 0; i < mesh->n_vertices; i++) {
+    int i, off = 0, n_edge_vertices = mesh->n_vertices - mesh->v_edgestart;
+    memset (offset, 0, n_edge_vertices * sizeof *offset);
+    for (i = 0; i < n_edge_vertices; i++) {
         /* offset[i] = 0; */
-        while (i + off < mesh->n_vertices && v_merge[i + off] > -1)
+        while (i + off < n_edge_vertices && v_merge[i + off] > -1)
             off++;
-        if (i + off < mesh->n_vertices) {
+        if (i + off < n_edge_vertices) {
+            int j = i + mesh->v_edgestart;
             offset[i + off] = off;
-            mesh->vertices[i * 3]     = mesh->vertices[(i + off) * 3];
-            mesh->vertices[i * 3 + 1] = mesh->vertices[(i + off) * 3 + 1];
-            mesh->vertices[i * 3 + 2] = mesh->vertices[(i + off) * 3 + 2];
-            mesh->v_flags[i] = mesh->v_flags[i + off];
+            mesh->vertices[j * 3]     = mesh->vertices[(j + off) * 3];
+            mesh->vertices[j * 3 + 1] = mesh->vertices[(j + off) * 3 + 1];
+            mesh->vertices[j * 3 + 2] = mesh->vertices[(j + off) * 3 + 2];
+            mesh->v_flags[j] = mesh->v_flags[j + off];
         }
     }
     mesh->n_vertices -= off;
@@ -269,14 +261,16 @@ static void reduce_mesh (struct mesh *mesh, int *v_merge, int *offset, int reduc
 
     reduce_vertices (mesh, v_merge, offset);
 
-    for (i = 0; i < mesh->n_indices; i++) {
-        int new = follow_merge (v_merge, mesh->indices[i]);
-        mesh->indices[i] = new - offset[new];
+    for (i = mesh->i_edgestart; i < mesh->n_indices; i++) {
+        if (mesh->indices[i] >= mesh->v_edgestart) {
+            int new = follow_merge (v_merge, mesh->indices[i] - mesh->v_edgestart);
+            mesh->indices[i] = new - offset[new] + mesh->v_edgestart;
+        }
     }
 
     if (reduce_indices) {
         int off = 0;
-        for (i = 0; i < mesh->n_indices; i += 3) {
+        for (i = mesh->i_edgestart; i < mesh->n_indices; i += 3) {
             while (i + off < mesh->n_indices &&
                    (mesh->indices[i + off]     == mesh->indices[i + off + 1] ||
                     mesh->indices[i + off + 1] == mesh->indices[i + off + 2] ||
@@ -296,20 +290,24 @@ static void reduce_mesh (struct mesh *mesh, int *v_merge, int *offset, int reduc
 
 void full_decimate_edges (int edges, struct mesh *mesh) {
     int i, k;
-    int *vertices = mesh->vertices, *indices = mesh->indices, *v_flags = mesh->v_flags;
+    int *indices = mesh->indices, *v_flags = mesh->v_flags;
+    /* int voff = mesh->v_edgestart; */
+    /* int ioff = mesh->v_edgestart; */
     size_t i2, i3, i4;
-    i2 =      mesh->n_vertices * sizeof (int);
-    i3 = i2 + mesh->n_indices  * sizeof (int);
-    i4 = i3 + mesh->n_vertices * sizeof (struct tri);
-    size_t total = i4 + mesh->n_indices * sizeof (struct tri*);
+    size_t n_edge_vertices = mesh->n_vertices - mesh->v_edgestart;
+    size_t n_edge_indices = mesh->n_indices - mesh->i_edgestart;
+    i2 =      n_edge_vertices * sizeof (int);
+    i3 = i2 + n_edge_indices  * sizeof (int);
+    i4 = i3 + n_edge_vertices * sizeof (struct tri);
+    size_t total = i4 + n_edge_indices * sizeof (struct tri*);
     /* TODO: optimize memory allocation by reusing memory */
-    void *memory = malloc (i4 + mesh->n_indices * sizeof (struct tri*));
+    void *memory = malloc (total);
     int *v_merge = memory;
     int *tmp_indices = memory + i2;
     struct tri *tris = memory + i3;
     struct tri **sorted = memory + i4;
 
-    for (i = 0; i < mesh->n_vertices; i++)
+    for (i = 0; i < n_edge_vertices; i++)
         v_merge[i] = -1;
 
     for (i = 0; i < 6; i++) {
@@ -318,36 +316,34 @@ void full_decimate_edges (int edges, struct mesh *mesh) {
             continue;
         k = 0;
         /* capture every triangle's edge that's on side[i] */
-        /* TODO: use mesh->i_edgestart */
-        for (int j = 0; j < mesh->n_indices; j += 3) {
-            /* edge 1 */
+        for (int j = mesh->i_edgestart; j < mesh->n_indices; j += 3) {
             /* or :
                v_flags[indices[j]] & v_flags[indices[j + 1]] & side */
-            if (v_flags[indices[j]] & side && v_flags[indices[j + 1]] & side) {
-                tmp_indices[k] = indices[j];
-                tmp_indices[k + 1] = indices[j + 1];
+            /* TODO: v_flags should only apply from v_edgestart */
+            if        (v_flags[indices[j]]     & side && v_flags[indices[j + 1]] & side) {
+                tmp_indices[k]     = indices[j]     - mesh->v_edgestart;
+                tmp_indices[k + 1] = indices[j + 1] - mesh->v_edgestart;
                 k += 2;
             } else if (v_flags[indices[j + 1]] & side && v_flags[indices[j + 2]] & side) {
-                tmp_indices[k] = indices[j + 1];
-                tmp_indices[k + 1] = indices[j + 2];
+                tmp_indices[k]     = indices[j + 1] - mesh->v_edgestart;
+                tmp_indices[k + 1] = indices[j + 2] - mesh->v_edgestart;
                 k += 2;
-            } else if (v_flags[indices[j + 2]] & side && v_flags[indices[j]] & side) {
-                tmp_indices[k] = indices[j + 2];
-                tmp_indices[k + 1] = indices[j];
+            } else if (v_flags[indices[j + 2]] & side && v_flags[indices[j]]     & side) {
+                tmp_indices[k]     = indices[j + 2] - mesh->v_edgestart;
+                tmp_indices[k + 1] = indices[j]     - mesh->v_edgestart;
                 k += 2;
             }
         }
         /* decimate */
         /* TODO: use v_flags to know which vertices shouldnt be touched/moved */
-        decimate (mesh->n_vertices, k, vertices, tmp_indices,
-                  v_merge, side, tris, sorted);
+        decimate (mesh->n_vertices - mesh->v_edgestart, k, &mesh->vertices[mesh->v_edgestart * 3],
+                  tmp_indices, v_merge, side, tris, sorted);
     }
 
-    printf ("before n indices : %d\n", mesh->n_indices);
+    /* TODO: move memory allocation */
     int *offset = malloc (mesh->n_vertices * sizeof *offset);
     reduce_mesh (mesh, v_merge, offset, TRUE);
     free (offset);
-    printf ("after n indices : %d\n", mesh->n_indices);
 
     free (memory);
 }
@@ -509,6 +505,72 @@ static void mk_grid (int x, int y, int z, struct mesh *mesh) {
     }
 }
 
+static inline void switch_vertices (int *a, int *b) {
+    int c;
+    c = a[0], a[0] = b[0], b[0] = c;
+    c = a[1], a[1] = b[1], b[1] = c;
+    c = a[2], a[2] = b[2], b[2] = c;
+}
+
+/* more accurately: switch triangles */
+static inline void switch_indices (int *a, int *b) {
+    return switch_vertices (a, b);
+}
+
+static inline void switch_v_flags (int *a, int *b) {
+    int c;
+    c = *a, *a = *b, *b = c;
+}
+
+static inline int is_triangle_on_edge (int *indices, int *v_flags) {
+    return v_flags[indices[0]] || v_flags[indices[1]] || v_flags[indices[2]];
+}
+
+static size_t partition_vertices (int num, int *vertices, int *v_flags, int *map) {
+    int i, end = num - 1;
+    for (i = 0; i < num; i++)
+        map[i] = -1;
+    for (i = 0; i < end; i++) {
+        if (v_flags[i]) {
+            switch_vertices (&vertices[i * 3], &vertices[end * 3]);
+            switch_v_flags (&v_flags[i], &v_flags[end]);
+            map[end] = i;
+            if (end < num - 1 && map[end + 1] == i)
+                map[end + 1] = end;
+            else
+                map[i] = end;
+            i--;
+            end--;
+        }
+    }
+    return v_flags[i] ? i : i + 1;
+}
+
+static size_t partition_indices (int num, int *indices, int *v_flags) {
+    int i, end = num - 1;
+    for (i = 0; i < end; i++) {
+        if (is_triangle_on_edge(&indices[i * 3], v_flags)) {
+            switch_indices (&indices[i * 3], &indices[end * 3]);
+            i--;
+            end--;
+        }
+    }
+    return is_triangle_on_edge(&indices[i * 3], v_flags) ? i : i + 1;
+}
+
+static void separate_edges (struct mesh *mesh) {
+    int i;
+    int *map = malloc (mesh->n_vertices * sizeof *map);
+
+    mesh->v_edgestart = partition_vertices (mesh->n_vertices, mesh->vertices, mesh->v_flags, map);
+    for (i = 0; i < mesh->n_indices; i++) {
+        if (map[mesh->indices[i]] > -1)
+            mesh->indices[i] = map[mesh->indices[i]];
+    }
+    mesh->i_edgestart = partition_indices (mesh->n_indices / 3, mesh->indices, mesh->v_flags);
+    mesh->i_edgestart *= 3;
+}
+
 static void draw (struct mesh *mesh) {
     int coul[6] = {0x00550000,
                    0x00555000,
@@ -575,10 +637,13 @@ int main (void) {
     }
 
     mk_grid (0, 0, 0, &mesh[0]);
-    mk_grid (GRID_W, 0, 0, &mesh[1]);
-    mk_grid (0, GRID_H, 0, &mesh[2]);
-    mk_grid (GRID_W, GRID_H, 0, &mesh[3]);
-    merge_cubes (mesh, &mesh[8]);
+    /* mk_grid (GRID_W, 0, 0, &mesh[1]); */
+    /* mk_grid (0, GRID_H, 0, &mesh[2]); */
+    /* mk_grid (GRID_W, GRID_H, 0, &mesh[3]); */
+    /* merge_cubes (mesh, &mesh[8]); */
+
+    separate_edges (&mesh[0]);
+    full_decimate_edges (MX | PX | MY | PY, &mesh[0]);
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
     float dist = 10.0;
@@ -626,7 +691,7 @@ int main (void) {
 
         setup_view (rx, ry, dist);
 
-        draw (&mesh[8]);
+        draw (&mesh[0]);
 
         SDL_GL_SwapWindow (Window);
     }
