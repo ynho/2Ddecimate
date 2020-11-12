@@ -348,24 +348,74 @@ void full_decimate_edges (int edges, struct mesh *mesh) {
     free (memory);
 }
 
+static void copy_mesh (struct mesh *dst, struct mesh *src) {
+    memcpy (dst->vertices, src->vertices, dst->n_vertices * 3 * sizeof *dst->vertices);
+    memcpy (dst->v_flags, src->v_flags, dst->n_vertices * sizeof *dst->v_flags);
+    memcpy (dst->indices, src->indices, dst->n_indices * sizeof *dst->indices);
+    dst->n_vertices = src->n_vertices;
+    dst->n_indices = src->n_indices;
+    dst->v_edgestart = src->v_edgestart;
+    dst->i_edgestart = src->i_edgestart;
+}
+
+static void concatenate_non_empty_meshes (struct mesh *a, struct mesh *b, struct mesh *result) {
+    int a_vsize = a->n_vertices - a->v_edgestart;
+    int b_vsize = b->n_vertices - b->v_edgestart;
+    int a_vstart = a->v_edgestart + b->v_edgestart;
+    int b_vstart = a->n_vertices + b->v_edgestart;
+
+    memcpy(result->vertices, a->vertices, a->v_edgestart * 3 * sizeof *result->vertices);
+    memcpy(&result->vertices[a->v_edgestart * 3], b->vertices, b->v_edgestart * 3 * sizeof *result->vertices);
+    memcpy(&result->vertices[a_vstart * 3], &a->vertices[a->v_edgestart * 3], a_vsize * 3 * sizeof *result->vertices);
+    memcpy(&result->vertices[b_vstart * 3], &b->vertices[b->v_edgestart * 3], b_vsize * 3 * sizeof *result->vertices);
+
+    /* theoretically no edges in the first a_vstart vertices :) */
+    memset (result->v_flags, 0, a_vstart * sizeof *result->v_flags);
+    memcpy (&result->v_flags[a_vstart], &a->v_flags[a->v_edgestart], a_vsize * sizeof *result->v_flags);
+    memcpy (&result->v_flags[b_vstart], &b->v_flags[b->v_edgestart], b_vsize * sizeof *result->v_flags);
+
+    int a_isize = a->n_indices - a->i_edgestart;
+    int b_isize = b->n_indices - b->i_edgestart;
+    int a_istart = a->i_edgestart + b->i_edgestart;
+    int b_istart = a->n_indices + b->i_edgestart;
+
+    memcpy (result->indices, a->indices, a->i_edgestart * sizeof *result->indices);
+    memcpy (&result->indices[a->i_edgestart], b->indices, b->i_edgestart * sizeof *result->indices);
+
+    memcpy(&result->indices[a_istart], &a->indices[a->i_edgestart], a_isize * sizeof *result->indices);
+    memcpy(&result->indices[b_istart], &b->indices[b->i_edgestart], b_isize * sizeof *result->indices);
+
+    int i;
+    /* TODO: use a_istart (but impossible to read) */
+    for (i = a->i_edgestart; i < a->i_edgestart + b->i_edgestart; i++)
+        result->indices[i] += a->v_edgestart;
+    for (i = a_istart; i < a_istart + a_isize; i++) {
+        if (result->indices[i] >= a->v_edgestart)
+            result->indices[i] += b->v_edgestart;
+    }
+    for (i = b_istart; i < b_istart + b_isize; i++) {
+        if (result->indices[i] >= b->v_edgestart)
+            result->indices[i] += a->n_vertices;
+        else
+            result->indices[i] += a->v_edgestart;
+    }
+}
 
 static void concatenate_meshes (struct mesh *a, struct mesh *b, struct mesh *result) {
-    int i;
-
     result->n_vertices = a->n_vertices + b->n_vertices;
-    result->vertices = malloc (result->n_vertices * sizeof *result->vertices * 3);
-    result->v_flags = malloc (result->n_vertices * sizeof *result->v_flags);
+    result->v_edgestart = a->v_edgestart + b->v_edgestart;
+    result->i_edgestart = a->i_edgestart + b->i_edgestart;
+    result->vertices = malloc (result->n_vertices * 3 * sizeof *result->vertices);
     result->n_indices = a->n_indices + b->n_indices;
-    result->indices = malloc (sizeof *result->indices * result->n_indices);
+    result->indices = malloc (result->n_indices * sizeof *result->indices);
+    result->v_flags = malloc (result->n_vertices * sizeof *result->v_flags);
 
-    memcpy(result->vertices, a->vertices, a->n_vertices * 3 * sizeof *result->vertices);
-    memcpy(&result->vertices[a->n_vertices * 3], b->vertices, b->n_vertices * 3 * sizeof *result->vertices);
-    memcpy(result->v_flags, a->v_flags, a->n_vertices * sizeof *result->v_flags);
-    memcpy(&result->v_flags[a->n_vertices], b->v_flags, b->n_vertices * sizeof *result->v_flags);
-    memcpy(result->indices, a->indices, a->n_indices * sizeof *result->indices);
-    memcpy(&result->indices[a->n_indices], b->indices, b->n_indices * sizeof *result->indices);
-    for (i = 0; i < b->n_indices; i++)
-        result->indices[i + a->n_indices] += a->n_vertices;
+    if (a->n_vertices == 0)
+        copy_mesh (result, b);
+    else if (b->n_vertices == 0)
+        copy_mesh (result, a);
+    else
+        concatenate_non_empty_meshes (a, b, result);
 }
 
 static int compare_vertices (int side, int *v1, int *v2) {
@@ -379,31 +429,42 @@ void merge (int side, struct mesh *a, struct mesh *b, struct mesh *result) {
     int *offset = NULL;
     int *v_merge = NULL;
 
+    if (a->n_vertices == 0 && b->n_vertices == 0) {
+        init_mesh (result);
+        return;
+    }
+
     concatenate_meshes (a, b, result);
 
-    v_merge = malloc (result->n_vertices * sizeof *v_merge);
-    offset = malloc (result->n_vertices * sizeof *offset);
-    for (i = 0; i < result->n_vertices; i++)
+    int a_vsize = a->n_vertices - a->v_edgestart;
+    int b_vsize = b->n_vertices - b->v_edgestart;
+    int n_edge_vertices = result->n_vertices - result->v_edgestart;
+    int a_off = result->v_edgestart;
+    int b_off = result->v_edgestart + a_vsize;
+    v_merge = malloc (n_edge_vertices * sizeof *v_merge);
+    for (i = 0; i < n_edge_vertices; i++)
         v_merge[i] = -1;
 
-    for (i = a->n_vertices; i < result->n_vertices; i++) {
-        if (result->v_flags[i] & (side << 1)) {
+    for (i = 0; i < a_vsize; i++) {
+        if (result->v_flags[i + a_off] & side) {
             /* find matching vertex */
             /* NOTE: make sure not to overlap with B's vertices, or there would be self-merging */
-            for (j = 0; j < a->n_vertices; j++) {
-                if (result->v_flags[j] & side &&
-                    compare_vertices (side, &result->vertices[j * 3], &result->vertices[i * 3])) {
-                    v_merge[i] = j;
-                    result->v_flags[j] ^= side;
+            for (j = 0; j < b_vsize; j++) {
+                if (result->v_flags[j + b_off] & (side << 1) &&
+                    compare_vertices (side, &result->vertices[(j + b_off) * 3],
+                                            &result->vertices[(i + a_off) * 3])) {
+                    v_merge[i] = j + a_vsize;
+                    result->v_flags[j + b_off] ^= (side << 1);
                 }
             }
         }
     }
 
+    offset = malloc (n_edge_vertices * sizeof *offset);
     reduce_mesh (result, v_merge, offset, FALSE);
 
-    free (v_merge);
     free (offset);
+    free (v_merge);
 }
 
 int face_mask_from_cube_id (int id) {
@@ -415,8 +476,10 @@ void merge_cubes (struct mesh m[8], struct mesh *result) {
     struct mesh mesh[6];
 
     /* decimate _outside_ faces to match with lower-level LODs */
-    for (i = 0; i < 8; i++)
-        full_decimate_edges (face_mask_from_cube_id (i), &m[i]);
+    for (i = 0; i < 8; i++) {
+        if (m[i].n_vertices > 0)
+            full_decimate_edges (face_mask_from_cube_id (i), &m[i]);
+    }
 
     for (i = 0; i < 4; i++)
         merge (MX, &m[i * 2 + 1], &m[i * 2], &mesh[i]);
@@ -555,7 +618,7 @@ static size_t partition_indices (int num, int *indices, int *v_flags) {
             end--;
         }
     }
-    return is_triangle_on_edge(&indices[i * 3], v_flags) ? i : i + 1;
+    return is_triangle_on_edge (&indices[i * 3], v_flags) ? i : i + 1;
 }
 
 static void separate_edges (struct mesh *mesh) {
@@ -597,7 +660,6 @@ static void draw (struct mesh *mesh) {
     glEnd();
 }
 
-
 int main (void) {
     SDL_Window *Window = NULL;
     SDL_GLContext glContext;
@@ -628,7 +690,7 @@ int main (void) {
     for (i = 0; i < 9; i++)
         init_mesh (&mesh[i]);
 
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < 4; i++) {
         mesh[i].vertices = grid_vertices[i];
         mesh[i].indices = grid_indices[i];
         mesh[i].v_flags = grid_v_flags[i];
@@ -637,13 +699,15 @@ int main (void) {
     }
 
     mk_grid (0, 0, 0, &mesh[0]);
-    /* mk_grid (GRID_W, 0, 0, &mesh[1]); */
-    /* mk_grid (0, GRID_H, 0, &mesh[2]); */
-    /* mk_grid (GRID_W, GRID_H, 0, &mesh[3]); */
-    /* merge_cubes (mesh, &mesh[8]); */
+    mk_grid (GRID_W, 0, 0, &mesh[1]);
+    mk_grid (0, GRID_H, 0, &mesh[2]);
+    mk_grid (GRID_W, GRID_H, 0, &mesh[3]);
+    for (i = 0; i < 4; i++)
+        separate_edges (&mesh[i]);
+    merge_cubes (mesh, &mesh[8]);
 
-    separate_edges (&mesh[0]);
-    full_decimate_edges (MX | PX | MY | PY, &mesh[0]);
+    /* separate_edges (&mesh[0]); */
+    /* full_decimate_edges (MX | PX | MY | PY, &mesh[0]); */
 
     int prev_x = 0, prev_y = 0, ry = 0, rx = 0, mouse_pressed = 0;
     float dist = 10.0;
@@ -691,7 +755,7 @@ int main (void) {
 
         setup_view (rx, ry, dist);
 
-        draw (&mesh[0]);
+        draw (&mesh[8]);
 
         SDL_GL_SwapWindow (Window);
     }
